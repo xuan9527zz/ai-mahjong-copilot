@@ -1,0 +1,8 @@
+{
+  "name": "ai-mahjong-assistant-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check dist/assets/app.js"
+  }
+}

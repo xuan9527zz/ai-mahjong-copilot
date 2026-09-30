@@ -1,0 +1,12 @@
+{
+  "name": "AI 麻将助手",
+  "short_name": "麻将助手",
+  "description": "手机端实时麻将牌局辅助原型",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07110e",
+  "theme_color": "#07110e",
+  "icons": [
+    { "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
