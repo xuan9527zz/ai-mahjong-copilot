@@ -40,10 +40,12 @@ assert(game.getState().myHand.length === 13, '出牌后应恢复 13 张');
 game.undoLast();
 assert(game.getState().currentPlayer === 'self', '撤销后应恢复我的回合');
 assert(game.getState().myHand.length === 14, '撤销后应恢复 14 张');
-game.recordCall('opposite', 'PONG');
-assert(game.getState().currentPlayer === 'opposite', '对家碰后应改为对家出牌');
-
 game.correct(lastOpponentDiscard.id, '7p');
 assert(game.getState().discardPiles.left.at(-1).tile === '7p', '纠错事件应重建为七筒');
+
+game.startGame({ tiles: INITIAL_HAND });
+game.recordDiscard('9m');
+game.recordCall('left', 'PONG');
+assert(game.getState().currentPlayer === 'left', '上家碰后应改为上家出牌');
 
 console.log('MVP event flow smoke test passed');

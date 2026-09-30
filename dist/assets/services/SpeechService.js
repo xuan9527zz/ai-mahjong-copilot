@@ -1,6 +1,6 @@
 const NUMBERS = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 const ACTORS = { 上家: 'left', 对家: 'opposite', 下家: 'right', 我: 'self', 自己: 'self' };
-const ACTIONS = { 碰: 'PONG', 杠: 'KONG', 吃: 'CHI', 胡: 'WIN', 过: 'PASS' };
+const ACTIONS = { 碰: 'PONG', 杠: 'KONG', 自摸: 'WIN', 荣和: 'WIN', 胡: 'WIN', 过: 'PASS' };
 
 export class SpeechService {
   constructor(isLocked = () => false) {
@@ -44,14 +44,16 @@ export class SpeechService {
 
   parse(input) {
     const text = String(input || '').replace(/[，。！？,.!?\s]/g, '');
-    const actor = Object.entries(ACTORS).find(([name]) => text.includes(name))?.[1] || null;
+    const actors = [...new Set(Object.entries(ACTORS).filter(([name]) => text.includes(name)).map(([, value]) => value))];
+    const actor = actors[0] || null;
     const actionEntry = Object.entries(ACTIONS).find(([name]) => text.includes(name));
     const systemCommands = [
       ['结束本局', 'END_GAME'], ['重新识别', 'RESCAN'], ['继续', 'RESUME'], ['暂停', 'PAUSE'], ['撤销', 'UNDO'],
     ];
     const systemAction = systemCommands.find(([name]) => text.includes(name))?.[1];
-    if (systemAction) return { text: input, action: systemAction, actor, tile: parseTile(text), confidence: 0.98 };
-    return { text: input, action: actionEntry?.[1] || (parseTile(text) ? 'DISCARD' : null), actor, tile: parseTile(text), confidence: parseTile(text) ? 0.96 : 0.45 };
+    if (systemAction) return { text: input, action: systemAction, actor, actors, tile: parseTile(text), confidence: 0.98 };
+    if (text.includes('吃')) return { text: input, action: 'UNSUPPORTED', actor, actors, tile: parseTile(text), confidence: 0.99 };
+    return { text: input, action: actionEntry?.[1] || (parseTile(text) ? 'DISCARD' : null), actor, actors, tile: parseTile(text), winMethod: text.includes('自摸') ? 'TSUMO' : text.includes('荣和') ? 'RON' : null, discardMode: text.includes('摸切') ? 'draw' : text.includes('手切') ? 'hand' : 'unknown', confidence: parseTile(text) ? 0.96 : actionEntry ? 0.9 : 0.45 };
   }
 }
 

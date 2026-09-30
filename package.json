@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check dist/assets/app.js"
+    "check": "node --check dist/assets/app.js && node tests/smoke.mjs && node tests/rules.mjs"
   }
 }

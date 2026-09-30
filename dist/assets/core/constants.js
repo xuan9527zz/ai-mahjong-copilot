@@ -35,7 +35,7 @@ export const INITIAL_HAND = ['1m', '2m', '3m', '5m', '6m', '7m', '2p', '3p', '4p
 
 export const EVENT_LABELS = {
   GAME_START: '开局', INITIAL_HAND: '初始手牌', DRAW: '摸牌', DISCARD: '打出',
-  CHI: '吃', PONG: '碰', KONG: '杠', WIN: '胡', PASS: '过',
+  PONG: '碰', KONG: '杠', WIN: '胡', PASS: '过', STRATEGY_MODE: '策略',
   RECOMMENDATION: '建议', CORRECTION: '纠错', PAUSE: '暂停', RESUME: '继续', END_GAME: '结束',
 };
 
