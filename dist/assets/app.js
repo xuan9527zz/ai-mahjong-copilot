@@ -9,6 +9,7 @@ import { RulesEngine } from './core/RulesEngine.js';
 import { EVENT_LABELS, INITIAL_HAND, PLAYER_LABELS, TILE_LABELS, tileGlyph, tileLabel } from './core/constants.js';
 
 const app = document.querySelector('#app');
+const APP_BASE = new URL('../', import.meta.url).pathname;
 const eventStore = new EventStore();
 const rulesEngine = new RulesEngine();
 const game = new GameStateEngine(eventStore, rulesEngine);
@@ -34,7 +35,11 @@ function route() {
   if (path.endsWith('/review')) return 'review';
   return 'home';
 }
-function navigate(path) { history.pushState({}, '', path); render(); }
+function navigate(path) {
+  const suffix = path === '/' ? '' : `${path.replace(/^\/+|\/+$/g, '')}/`;
+  history.pushState({}, '', `${APP_BASE}${suffix}`);
+  render();
+}
 function render() {
   app.className = `app-shell route-${route()}`;
   if (route() === 'setup') renderSetup();
@@ -306,7 +311,7 @@ game.subscribe(() => { if (route() === 'play') renderPlay(); });
 audio.subscribe(() => { if (route() === 'play') renderPlay(); });
 addEventListener('popstate', render);
 document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && setup.permissions.wake && 'wakeLock' in navigator) runtime.wakeLock = await navigator.wakeLock.request('screen').catch(() => null); });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register(`${APP_BASE}sw.js`, { scope: APP_BASE }).catch(() => {});
 render();
 
 function registerWebMcp() {

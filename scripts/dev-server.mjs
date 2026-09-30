@@ -3,12 +3,14 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
 const root = normalize(decodeURIComponent(new URL('../dist/', import.meta.url).pathname).replace(/^\/(.:\/)/, '$1'));
+const basePath = process.env.MAHJONG_BASE_PATH || '/';
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.svg': 'image/svg+xml' };
 
 createServer(async (request, response) => {
   try {
     const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
-    let file = join(root, pathname.replace(/^\//, ''));
+    if (!pathname.startsWith(basePath)) throw new Error('Outside site base');
+    let file = join(root, pathname.slice(basePath.length));
     if ((await stat(file)).isDirectory()) file = join(file, 'index.html');
     const body = await readFile(file);
     response.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
@@ -17,4 +19,4 @@ createServer(async (request, response) => {
     response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     response.end('Not found');
   }
-}).listen(4173, '127.0.0.1', () => console.log('Local: http://127.0.0.1:4173'));
+}).listen(4173, '127.0.0.1', () => console.log(`Local: http://127.0.0.1:4173${basePath}`));
