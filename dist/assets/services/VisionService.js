@@ -24,7 +24,7 @@ export class VisionService {
     const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
     const geometry = locateRow(data, canvas.width, canvas.height, expectedCount);
     const templates = (await this.loadTemplates()).filter((item) => !excludeRows.includes(item.row));
-    const observations = geometry.centers.map((center, index) => {
+    const analyze = (centers) => centers.map((center, index) => {
       const face = document.createElement('canvas'); face.width = 68; face.height = 96;
       face.getContext('2d').drawImage(canvas, Math.round(center - geometry.pitch * .41),
         geometry.top, Math.round(geometry.pitch * .82), geometry.bottom - geometry.top, 0, 0, 68, 96);
@@ -36,6 +36,18 @@ export class VisionService {
         distance: first.distance, alternatives: ranked.slice(0, 5),
         status: accepted ? 'likely' : 'uncertain', crop: face.toDataURL('image/jpeg', .82) };
     });
+    const layouts = [
+      { name: 'ink', centers: geometry.inkCenters, observations: analyze(geometry.inkCenters) },
+      { name: 'grid', centers: geometry.gridCenters, observations: analyze(geometry.gridCenters) },
+    ];
+    // Select layout from geometry, not classification scores: a badly cropped
+    // neighboring glyph can otherwise look like a confident but wrong tile.
+    const drifted = geometry.inkCenters.slice(-5).every((center, index) =>
+      center < geometry.gridCenters[expectedCount - 5 + index] - geometry.pitch * .28);
+    const selected = layouts.find((layout) => layout.name === (drifted ? 'grid' : 'ink'));
+    const observations = selected.observations;
+    geometry.centers = selected.centers;
+    geometry.layout = selected.name;
     return { tiles: observations.map((item) => item.tile), observations,
       count: observations.length, recognized: observations.filter((item) => item.tile).length,
       source: 'VISION', stable: false, geometry };
@@ -131,19 +143,21 @@ function locateRow(data, width, height, expectedCount) {
     const i = (y * width + x) * 4;
     if (isInk(data[i], data[i + 1], data[i + 2])) ink[x]++;
   }
-  const projection = smooth(ink, 24), centers = [];
+  const projection = smooth(ink, 24), inkCenters = [], gridCenters = [];
   for (let n = 0; n < expectedCount; n++) {
     const expected = left + (n + .5) * pitch;
-    const lo = Math.max(0, Math.round(expected - pitch * .55), centers.length ? Math.round(centers.at(-1) + pitch * .67) : 0);
+    const lo = Math.max(0, Math.round(expected - pitch * .55), inkCenters.length ? Math.round(inkCenters.at(-1) + pitch * .67) : 0);
     const hi = Math.min(width - 1, Math.round(expected + pitch * .55));
     let chosen = Math.round(expected), best = -1;
     for (let x = lo; x <= hi; x++) {
       const score = projection[x] * Math.max(0, Math.min(1, (white[x] - 160) / 55));
       if (score > best) { best = score; chosen = x; }
     }
-    centers.push(chosen);
+    inkCenters.push(chosen);
+    gridCenters.push(Math.round(expected));
   }
-  return { left, right, top: Math.max(0, top - 12), bottom: Math.min(height, bottom + 16), pitch, centers };
+  return { left, right, top: Math.max(0, top - 12), bottom: Math.min(height, bottom + 16),
+    pitch, inkCenters, gridCenters };
 }
 
 function describe(face) {

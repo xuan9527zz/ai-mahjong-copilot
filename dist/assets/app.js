@@ -26,7 +26,8 @@ const setup = {
   initialHand: [], scan: null, handConfirmed: false,
 };
 const runtime = { lastMessage: '', speechFallback: false, wakeLock: null };
-const visionTest = { result: null, expectedCount: 13, imageName: '' };
+const visionTest = { result: null, expectedCount: 13, imageName: '', verified: false,
+  message: '先开启摄像头，对准整排手牌后，再点“拍摄当前画面”；也可直接选择照片。' };
 let toastTimer;
 
 function route() {
@@ -357,29 +358,39 @@ function renderVisionTest() {
     <section class="setup-content"><div class="setup-title"><span class="section-kicker">ON-DEVICE VISION</span><h2>用照片测试识别</h2><p>选择一张能看清整排手牌的照片。照片只在本机处理；目前仅以你提供的三张照片建立牌面模板，未见过的牌应手动确认。</p></div>
       <label class="file-button">选择照片<input type="file" id="test-photo" accept="image/*" /></label>
       <button class="secondary-btn full" id="test-camera">${camera.stream ? '拍摄当前画面' : '开启后置摄像头'}</button>
+      <p class="test-status" id="test-status" role="status">${escapeHtml(visionTest.message)}</p>
       <div class="camera-frame test-camera-frame"><video id="test-preview" autoplay muted playsinline></video><div class="camera-placeholder"><span>摄像头预览</span></div></div>
       <label class="field-label" for="test-count">预期手牌张数</label><select class="select-control" id="test-count"><option value="13">13 张</option><option value="14">14 张</option></select>
-      ${result ? `<div class="scan-summary"><span><b>已定位 ${result.count} 个牌位</b><small>${result.recognized} 张暂识别 · ${result.count - result.recognized} 张待确认</small></span><span class="success-badge">${escapeHtml(visionTest.imageName)}</span></div>
+      ${result ? `<div id="test-results" class="scan-summary"><span><b>已定位 ${result.count} 个牌位</b><small>${result.recognized} 张暂识别 · ${result.count - result.recognized} 张待确认</small></span><span class="success-badge">${escapeHtml(visionTest.imageName)}</span></div>
         ${location.hostname === '127.0.0.1' ? `<pre id="test-geometry" hidden>${JSON.stringify(result.geometry)}</pre>` : ''}
         <p class="test-caveat">牌位按预期张数分割，不等于独立验证张数。点下面任意牌可纠正；相近牌和样本外牌不要直接用于实战。</p>
-        <div class="test-tile-grid">${result.observations.map((item) => `<button class="test-tile ${item.tile ? '' : 'uncertain'}" data-test-index="${item.index}" title="${item.alternatives.map((candidate) => `${candidate.tile}:${candidate.distance.toFixed(3)}`).join(' ')}"><img src="${item.crop}" alt="第 ${item.index + 1} 张牌面裁剪" /><span>${item.index + 1}. ${item.tile ? tileLabel(item.tile) : `待确认${item.candidate ? ` · 可能${tileLabel(item.candidate)}` : ''}`}</span></button>`).join('')}</div>` : '<p class="privacy-note">测试结果不会自动进入牌局。开局时请在设置流程中再次扫描并逐张确认。</p>'}
+        <div class="test-tile-grid">${result.observations.map((item) => `<button class="test-tile ${item.tile ? '' : 'uncertain'}" data-test-index="${item.index}" title="${item.alternatives.map((candidate) => `${candidate.tile}:${candidate.distance.toFixed(3)}`).join(' ')}"><img src="${item.crop}" alt="第 ${item.index + 1} 张牌面裁剪" /><span>${item.index + 1}. ${item.tile ? tileLabel(item.tile) : `待确认${item.candidate ? ` · 可能${tileLabel(item.candidate)}` : ''}`}</span></button>`).join('')}</div>
+        <section class="sample-export"><h3>导出小样本，不传视频</h3><p>逐张核对牌名后，只导出 ${result.count} 张牌面小图和标签；不会包含整张照片。</p><label><input id="verify-samples" type="checkbox" ${visionTest.verified ? 'checked' : ''} ${result.tiles.every(Boolean) ? '' : 'disabled'} /> 我已逐张核对以上牌名</label><button class="secondary-btn full" id="export-samples" ${visionTest.verified && result.tiles.every(Boolean) ? '' : 'disabled'}>导出已标注牌面</button></section>` : '<p class="privacy-note">测试结果不会自动进入牌局。开局时请在设置流程中再次扫描并逐张确认。</p>'}
     </section><dialog class="tile-dialog" id="tile-picker"></dialog><div class="toast" id="toast" role="status"></div>
   </main>`;
   byId('test-home').onclick = () => navigate('/');
   byId('test-count').value = String(visionTest.expectedCount);
-  byId('test-count').onchange = (event) => { visionTest.expectedCount = Number(event.target.value); visionTest.result = null; renderVisionTest(); };
+  byId('test-count').onchange = (event) => { visionTest.expectedCount = Number(event.target.value); visionTest.result = null; visionTest.verified = false; renderVisionTest(); };
   byId('test-photo').onchange = async (event) => {
     const file = event.target.files[0]; if (!file) return;
-    try { visionTest.imageName = file.name; visionTest.result = await vision.detectHand(await imageFromFile(file), { expectedCount: visionTest.expectedCount }); renderVisionTest(); }
-    catch (error) { showToast(error.message); }
+    visionTest.message = '正在分析所选照片…'; byId('test-status').textContent = visionTest.message;
+    try { visionTest.imageName = file.name; visionTest.result = await vision.detectHand(await imageFromFile(file), { expectedCount: visionTest.expectedCount }); finishVisionTestScan(); }
+    catch (error) { visionTest.message = error.message; renderVisionTest(); }
   };
   byId('test-camera').onclick = async () => {
+    const button = byId('test-camera'); button.disabled = true;
     try {
-      if (!camera.stream) { await camera.request(byId('test-preview')); byId('test-camera').textContent = '拍摄当前画面'; return; }
+      if (!camera.stream) {
+        visionTest.message = '正在打开后置摄像头…'; byId('test-status').textContent = visionTest.message;
+        await camera.request(byId('test-preview'));
+        visionTest.message = '摄像头已打开。请把整排牌放在画面内，再点“拍摄当前画面”进行识别。';
+        renderVisionTest(); return;
+      }
+      visionTest.message = '正在截取并分析当前画面…'; byId('test-status').textContent = visionTest.message;
       const image = camera.snapshot(byId('test-preview'));
       visionTest.imageName = '摄像头';
-      visionTest.result = await vision.detectHand(image, { expectedCount: visionTest.expectedCount }); renderVisionTest();
-    } catch (error) { showToast(error.message); }
+      visionTest.result = await vision.detectHand(image, { expectedCount: visionTest.expectedCount }); finishVisionTestScan();
+    } catch (error) { visionTest.message = error.message; renderVisionTest(); }
   };
   if (camera.stream) camera.attach(byId('test-preview'));
   document.querySelectorAll('[data-test-index]').forEach((button) => button.onclick = () => {
@@ -389,17 +400,50 @@ function renderVisionTest() {
       visionTest.result.observations[index].tile = tile;
       visionTest.result.tiles[index] = tile;
       visionTest.result.recognized = visionTest.result.tiles.filter(Boolean).length;
+      visionTest.verified = false;
       renderVisionTest();
     }, `纠正第 ${index + 1} 张`);
   });
+  if (byId('verify-samples')) byId('verify-samples').onchange = (event) => {
+    visionTest.verified = event.target.checked;
+    byId('export-samples').disabled = !visionTest.verified;
+  };
+  if (byId('export-samples')) byId('export-samples').onclick = exportVisionSamples;
   const sample = new URLSearchParams(location.search).get('sample');
   if (location.hostname === '127.0.0.1' && /^[1-3]$/.test(sample || '') && !visionTest.result) {
     const image = new Image(); image.src = `/__sample/${sample}.jpg`;
     const holdout = new URLSearchParams(location.search).has('holdout');
     image.decode().then(() => vision.detectHand(image, { expectedCount: 13, excludeRows: holdout ? [Number(sample) - 1] : [] })).then((result) => {
-      visionTest.imageName = `本地测试照片 ${sample}${holdout ? ' · 留出验证' : ''}`; visionTest.result = result; renderVisionTest();
-    }).catch((error) => showToast(error.message));
+      visionTest.imageName = `本地测试照片 ${sample}${holdout ? ' · 留出验证' : ''}`; visionTest.result = result; finishVisionTestScan();
+    }).catch((error) => { visionTest.message = error.message; renderVisionTest(); });
   }
+}
+
+function finishVisionTestScan() {
+  visionTest.verified = false;
+  const recognized = visionTest.result.recognized;
+  visionTest.message = recognized === 0
+    ? '已找到牌列，但没有一张达到自动确认门槛。请点下面的牌面核对，或靠近手牌重新拍摄。'
+    : `已找到牌列，${recognized}/${visionTest.result.count} 张达到暂识别门槛。请向下逐张核对，未确定的牌不会自动写入牌局。`;
+  renderVisionTest();
+  requestAnimationFrame(() => byId('test-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
+
+async function exportVisionSamples() {
+  const result = visionTest.result;
+  if (!visionTest.verified || !result?.tiles.every(Boolean)) return;
+  const payload = { format: 'mahjong-tile-samples-v1', createdAt: new Date().toISOString(),
+    tiles: result.observations.map((item) => ({ position: item.index + 1, tile: item.tile, image: item.crop })) };
+  const file = new File([JSON.stringify(payload)], `mahjong-tiles-${Date.now()}.json`, { type: 'application/json' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: '麻将牌面小样本' }); return; }
+    catch (error) { if (error.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(file);
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.name;
+  document.body.append(anchor); anchor.click(); anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('已导出牌面小样本');
 }
 
 async function imageFromFile(file) {
