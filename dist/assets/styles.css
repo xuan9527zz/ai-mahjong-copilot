@@ -163,6 +163,15 @@ button:disabled { opacity: .38; cursor: not-allowed; }
 .mahjong-tile.editable { cursor: pointer; }
 .hand-order { display: flex; align-items: center; gap: 8px; margin: 15px 0 18px; color: var(--muted); font-size: .69rem; }.hand-order div { height: 1px; background: var(--line); flex: 1; }
 .confirm-note { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 14px; }.confirm-note > span { color: var(--green); }.confirm-note p { margin: 0; display: flex; flex-direction: column; gap: 3px; }.confirm-note small { color: var(--muted); }
+.file-button { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; margin: 10px 0; border: 1px solid var(--line); border-radius: 16px; background: rgba(65,217,146,.08); color: var(--ink); font-weight: 750; cursor: pointer; }
+.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.test-camera-frame { margin: 12px 0; aspect-ratio: 4 / 2.3; }
+.test-caveat { color: var(--muted); font-size: .8rem; line-height: 1.6; }
+.test-tile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0 30px; }
+.test-tile { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.test-tile.uncertain { border-color: rgba(243,201,107,.55); color: var(--gold); }
+.test-tile img { display: block; width: 56px; height: 78px; object-fit: contain; border-radius: 4px; background: #fff; }
+.test-tile span { max-width: 100%; font-size: .73rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Play surface */
 .play-page { min-height: 100dvh; padding-bottom: calc(74px + env(safe-area-inset-bottom)); }

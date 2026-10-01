@@ -1,7 +1,8 @@
-const CACHE = 'mahjong-ai-v3';
+const CACHE = 'mahjong-ai-v4';
 const ASSETS = [
-  './', './setup/', './play/', './review/', './manifest.webmanifest',
+  './', './setup/', './play/', './review/', './vision-test/', './manifest.webmanifest',
   './assets/styles.css', './assets/app.js', './assets/icon.svg',
+  './assets/vision-tiles-atlas.webp',
   './assets/icon-180.png', './assets/icon-192.png', './assets/icon-512.png',
   './assets/core/constants.js', './assets/core/EventStore.js',
   './assets/core/RulesEngine.js', './assets/core/HandAnalysis.js', './assets/core/DecisionEngine.js',

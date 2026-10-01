@@ -120,14 +120,15 @@ export class GameStateEngine {
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   getState() { return this.state; }
 
-  startGame({ tiles = INITIAL_HAND, rules = RULE_PROFILE.id, seat = 'east', dealer = 'self' } = {}) {
+  startGame({ tiles = INITIAL_HAND, rules = RULE_PROFILE.id, seat = 'east', dealer = 'self', initialSource = 'MANUAL' } = {}) {
     this.rules.validateTiles(tiles);
     if (tiles.length !== 13) throw new Error('初始手牌必须有 13 张');
     if (rules !== RULE_PROFILE.id) throw new Error('目前只支持附件中的广东麻将规则');
     this.store.clear();
     this.store.appendMany([
       { actor: 'system', type: 'GAME_START', metadata: { rules, seat, dealer, currentPlayer: 'right', round: 1 } },
-      { actor: 'self', type: 'INITIAL_HAND', tiles, source: 'VISION', confidence: 0.96 },
+      { actor: 'self', type: 'INITIAL_HAND', tiles, source: initialSource, confidence: 1,
+        metadata: { humanConfirmed: true } },
     ]);
   }
 
@@ -146,13 +147,13 @@ export class GameStateEngine {
     });
   }
 
-  recordDraw(tile, source = 'VISION') {
+  recordDraw(tile, source = 'MANUAL') {
     this.assertActive();
     this.assertTile(tile);
     const meldCount = this.state.melds.filter((meld) => meld.actor === 'self').length;
     if (this.state.currentPlayer !== 'self' || this.state.myHand.length !== 13 - 3 * meldCount) throw new Error('当前不是可摸牌状态');
     this.assertAvailable(tile);
-    return this.store.append({ actor: 'self', type: 'DRAW', tile, source, confidence: 0.95 });
+    return this.store.append({ actor: 'self', type: 'DRAW', tile, source, confidence: source === 'VISION' ? 0.95 : 1 });
   }
   recordCall(actor, type, tile = null) {
     this.assertActive();

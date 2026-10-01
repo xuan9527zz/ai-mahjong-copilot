@@ -23,9 +23,10 @@ const setup = {
   step: Number(sessionStorage.getItem('mahjong-setup-step') || 1),
   rule: rulesEngine.profile.id, seat: 'east', dealer: 'self',
   permissions: { camera: camera.state === 'ready', microphone: Boolean(speech.stream), audio: false, wake: false },
-  initialHand: [...INITIAL_HAND],
+  initialHand: [], scan: null, handConfirmed: false,
 };
 const runtime = { lastMessage: '', speechFallback: false, wakeLock: null };
+const visionTest = { result: null, expectedCount: 13, imageName: '' };
 let toastTimer;
 
 function route() {
@@ -33,6 +34,7 @@ function route() {
   if (path.endsWith('/setup')) return 'setup';
   if (path.endsWith('/play')) return 'play';
   if (path.endsWith('/review')) return 'review';
+  if (path.endsWith('/vision-test')) return 'vision-test';
   return 'home';
 }
 function navigate(path) {
@@ -45,6 +47,7 @@ function render() {
   if (route() === 'setup') renderSetup();
   else if (route() === 'play') renderPlay();
   else if (route() === 'review') renderReview();
+  else if (route() === 'vision-test') renderVisionTest();
   else renderHome();
 }
 
@@ -64,7 +67,7 @@ function renderHome() {
       <div class="toast" id="toast" role="status"></div>
     </main>`;
   byId('start-game').onclick = () => { setup.step = 1; sessionStorage.setItem('mahjong-setup-step', '1'); navigate('/setup'); };
-  byId('recognition-test').onclick = () => { setup.step = 4; sessionStorage.setItem('mahjong-setup-step', '4'); navigate('/setup'); };
+  byId('recognition-test').onclick = () => navigate('/vision-test');
   byId('history-button').onclick = () => sessions.length ? navigate('/review') : showToast('还没有已保存的牌局');
   document.querySelectorAll('[data-toast]').forEach((button) => button.onclick = () => showToast(button.dataset.toast));
   document.querySelectorAll('[data-review-session]').forEach((button) => button.onclick = () => navigate('/review'));
@@ -97,16 +100,16 @@ function setupStepTemplate() {
   if (setup.step === 3) return `
     <div class="setup-title"><span class="section-kicker">STEP 03</span><h2>检查设备权限</h2><p>摄像头与麦克风会在浏览器内同时保持运行。</p></div>
     <div class="permission-list">${permissionRow('camera', '摄像头', '观察手牌', '允许摄像头')}${permissionRow('microphone', '麦克风', '听取出牌', '允许麦克风')}${permissionRow('audio', '音频播放', '播报建议', '测试扬声器')}${permissionRow('wake', '屏幕常亮', '避免牌局中锁屏', '保持常亮')}</div>
-    <p class="privacy-note">视频不会持续上传。原型中的牌面识别在本机以 Mock 事件模拟。</p>`;
+    <p class="privacy-note">摄像头画面只在本机识别，不上传完整照片。实时摸牌和出牌仍需用模拟按钮录入。</p>`;
   if (setup.step === 4) return `
     <div class="setup-title"><span class="section-kicker">STEP 04</span><h2>校准摄像头</h2><p>请让全部手牌落在框内，并保持机位稳定。</p></div>
     <div class="camera-frame"><video id="camera-preview" autoplay muted playsinline></video><div class="camera-placeholder"><span>摄像头预览</span><small>允许权限后显示实时画面</small></div><div class="roi"><span>请将手牌放在这里</span><div>${INITIAL_HAND.slice(0, 8).map(tileGlyph).join(' ')}</div></div><span class="camera-live">LIVE</span></div>
-    <div class="calibration-status"><span>✓ 画面稳定</span><span>✓ 光线正常</span><span>✓ 检测到 13 张牌</span></div><button class="secondary-btn full" id="scan-hand">模拟扫描 13 张手牌</button>`;
+    <div class="calibration-status"><span>本机测试版：只适配样本里的牌面样式</span><span>识别不确定时必须人工核对</span></div><button class="secondary-btn full" id="scan-hand">拍照识别当前手牌</button><label class="file-button">或选择手牌照片<input type="file" id="setup-photo" accept="image/*" /></label><button class="text-btn" id="use-demo-hand">仅演示：使用固定 13 张牌</button>`;
   return `
     <div class="setup-title"><span class="section-kicker">STEP 05</span><h2>确认初始手牌</h2><p>从左到右保留物理位置。点任意牌可手动修改。</p></div>
-    <div class="scan-summary"><span><b>识别完成</b><small>置信度 96% · 13 张</small></span><span class="success-badge">稳定</span></div>
+    <div class="scan-summary"><span><b>${setup.scan?.source === 'VISION' ? '照片识别待核对' : '模拟手牌'}</b><small>${setup.initialHand.filter(Boolean).length}/${setup.initialHand.length} 张已确定 · ${setup.initialHand.length - setup.initialHand.filter(Boolean).length} 张待修改</small></span><span class="success-badge">${setup.handConfirmed ? '已确认' : '待确认'}</span></div>
     <div class="initial-hand-grid">${setup.initialHand.map((tile, index) => tileButton(tile, index, true)).join('')}</div><div class="hand-order"><span>左</span><div></div><span>右</span></div>
-    <div class="confirm-note"><span>✓</span><p><b>请务必核对一次</b><small>初始手牌会成为整局状态的基准。</small></p></div><button class="text-btn" id="rescan-hand">重新扫描</button>`;
+    <div class="confirm-note"><span>!</span><p><b>请逐张核对</b><small>未确认前不会写入牌局事件；样本外牌面可能识别失败。</small></p></div><button class="secondary-btn full" id="confirm-hand" ${setup.initialHand.length === 13 && setup.initialHand.every(Boolean) ? '' : 'disabled'}>确认这 13 张牌正确</button><button class="text-btn" id="rescan-hand">重新扫描</button>`;
 }
 
 function permissionRow(key, title, note, action) {
@@ -118,12 +121,38 @@ function bindSetupStep() {
   document.querySelectorAll('[data-seat]').forEach((button) => button.onclick = () => { setup.seat = button.dataset.seat; renderSetup(); });
   if (byId('dealer-select')) { byId('dealer-select').value = setup.dealer; byId('dealer-select').onchange = (event) => setup.dealer = event.target.value; }
   document.querySelectorAll('[data-permission]').forEach((button) => button.onclick = () => requestPermission(button.dataset.permission));
-  if (byId('scan-hand')) byId('scan-hand').onclick = async () => { byId('scan-hand').disabled = true; byId('scan-hand').textContent = '正在识别…'; const result = await vision.detectHand(); setup.initialHand = result.tiles; showToast('已检测到 13 张牌'); setTimeout(() => changeSetupStep(1), 350); };
-  if (byId('camera-preview')) { camera.attach(byId('camera-preview')); if (!camera.stream) camera.request(byId('camera-preview')).then(() => setup.permissions.camera = true).catch(() => showToast('摄像头未开启，可继续使用 Mock 模式')); }
-  document.querySelectorAll('[data-initial-index]').forEach((button) => button.onclick = () => showTilePicker((tile) => { setup.initialHand[Number(button.dataset.initialIndex)] = tile; renderSetup(); }, `修改第 ${Number(button.dataset.initialIndex) + 1} 张`));
+  if (byId('scan-hand')) byId('scan-hand').onclick = async () => {
+    const button = byId('scan-hand'); button.disabled = true; button.textContent = '正在读取画面…';
+    try {
+      const image = camera.snapshot(byId('camera-preview'));
+      if (!image) throw new Error('摄像头尚未准备好，请稍后重试或选择照片');
+      applySetupScan(await vision.detectHand(image));
+    } catch (error) { showToast(error.message); button.disabled = false; button.textContent = '拍照识别当前手牌'; }
+  };
+  if (byId('setup-photo')) byId('setup-photo').onchange = async (event) => {
+    try { applySetupScan(await vision.detectHand(await imageFromFile(event.target.files[0]))); }
+    catch (error) { showToast(error.message); }
+  };
+  if (byId('use-demo-hand')) byId('use-demo-hand').onclick = () => {
+    setup.initialHand = [...INITIAL_HAND]; setup.scan = { source: 'MOCK' }; setup.handConfirmed = false; changeSetupStep(1);
+  };
+  if (byId('camera-preview')) { camera.attach(byId('camera-preview')); if (!camera.stream) camera.request(byId('camera-preview')).then(() => setup.permissions.camera = true).catch(() => showToast('摄像头未开启，可选择照片测试')); }
+  document.querySelectorAll('[data-initial-index]').forEach((button) => button.onclick = () => showTilePicker((tile) => {
+    const index = Number(button.dataset.initialIndex);
+    setup.initialHand[index] = tile; setup.handConfirmed = false;
+    if (setup.scan?.source === 'VISION') void vision.learnCorrection(setup.scan.observations[index]?.crop, tile);
+    renderSetup();
+  }, `修改第 ${Number(button.dataset.initialIndex) + 1} 张`));
+  if (byId('confirm-hand')) byId('confirm-hand').onclick = () => { setup.handConfirmed = true; renderSetup(); };
   if (byId('rescan-hand')) byId('rescan-hand').onclick = () => { setup.step = 4; renderSetup(); };
 }
-function canContinueSetup() { return setup.step !== 3 || (setup.permissions.camera && setup.permissions.microphone && setup.permissions.audio); }
+function applySetupScan(result) { setup.scan = result; setup.initialHand = [...result.tiles]; setup.handConfirmed = false; changeSetupStep(1); }
+function canContinueSetup() {
+  if (setup.step === 3) return setup.permissions.camera && setup.permissions.microphone && setup.permissions.audio;
+  if (setup.step === 4) return Boolean(setup.scan);
+  if (setup.step === 5) return setup.handConfirmed && setup.initialHand.length === 13 && setup.initialHand.every(Boolean);
+  return true;
+}
 async function requestPermission(key) {
   try {
     if (key === 'camera') await camera.request();
@@ -135,7 +164,8 @@ async function requestPermission(key) {
 }
 function changeSetupStep(delta) { setup.step = Math.max(1, Math.min(5, setup.step + delta)); sessionStorage.setItem('mahjong-setup-step', String(setup.step)); renderSetup(); }
 function startGame() {
-  try { game.startGame({ tiles: setup.initialHand, rules: setup.rule, seat: setup.seat, dealer: setup.dealer }); navigate('/play'); }
+  try { game.startGame({ tiles: setup.initialHand, rules: setup.rule, seat: setup.seat, dealer: setup.dealer,
+    initialSource: setup.scan?.source === 'VISION' ? 'VISION' : 'MANUAL' }); navigate('/play'); }
   catch (error) { showToast(error.message); }
 }
 
@@ -147,7 +177,7 @@ function renderPlay() {
     <main class="play-page">
       <header class="play-header"><div><span class="round-label">第 ${state.turn} 巡</span><small>${rulesEngine.getName()}</small></div><div class="header-actions"><button class="icon-btn" id="settings" aria-label="设置">⚙</button><button class="icon-btn ${state.paused ? 'active' : ''}" id="pause" aria-label="暂停">${state.paused ? '▶' : 'Ⅱ'}</button></div></header>
       <section class="table-zone" aria-label="牌桌状态">${playerSeat('opposite', state)}${playerSeat('left', state)}${playerSeat('right', state)}<div class="table-center"><span>当前</span><b>${PLAYER_LABELS[state.currentPlayer]}</b><i></i></div></section>
-      <section class="hand-panel"><div class="panel-heading"><span><b>我的手牌</b><small>从左到右</small></span><strong>${state.myHand.length}<small> 张</small></strong></div><div class="hand-row">${state.myHand.map((tile, index) => tileButton(tile.code, index)).join('')}</div><div class="vision-line"><span class="camera-dot"></span><b>手牌识别正常</b><span>${state.myHand.length} 张 · 画面稳定</span><video id="play-camera" muted playsinline></video></div></section>
+      <section class="hand-panel"><div class="panel-heading"><span><b>我的手牌</b><small>从左到右</small></span><strong>${state.myHand.length}<small> 张</small></strong></div><div class="hand-row">${state.myHand.map((tile, index) => tileButton(tile.code, index)).join('')}</div><div class="vision-line"><span class="camera-dot"></span><b>${setup.scan?.source === 'VISION' ? '初始手牌已人工确认' : '模拟初始手牌'}</b><span>摸牌/弃牌仍为模拟录入</span><video id="play-camera" muted playsinline></video></div></section>
       ${recommendation && state.currentPlayer === 'self' && state.myHand.length === 14 - 3 * state.melds.filter((meld) => meld.actor === 'self').length ? recommendationCard(recommendation) : waitingCard(state)}
       <section class="listen-panel"><div class="listen-state"><span class="listen-orb ${audio.active ? 'locked' : ''}">${audio.active ? '🔊' : '🎤'}</span><span><b>${audio.active ? '正在播报 · 语音录入已锁定' : speech.listening ? '正在监听' : '麦克风待启动'}</b><small>${runtime.lastMessage || `当前：${PLAYER_LABELS[state.currentPlayer]}${state.currentPlayer === 'self' ? '摸牌' : '出牌'}`}</small></span></div><form class="speech-input" id="speech-form"><input id="speech-text" autocomplete="off" placeholder="也可输入：七条 / 对家碰 / 撤销" aria-label="输入语音命令" /><button>记录</button></form><div class="sim-row">${simulationControls(state)}</div></section>
       <nav class="play-nav"><button id="undo"><span>↶</span>撤销</button><button id="correct"><span>✎</span>纠正</button><button id="log"><span>≡</span>记录</button><button id="end"><span>■</span>结束</button></nav>
@@ -169,7 +199,7 @@ function recommendationCard(rec) {
 function waitingCard(state) {
   const selfTurn = state.currentPlayer === 'self';
   const target = 14 - 3 * state.melds.filter((meld) => meld.actor === 'self').length;
-  return `<section class="waiting-card"><span class="waiting-icon">${selfTurn ? '◫' : '···'}</span><div><span class="section-kicker">${selfTurn ? '等待摸牌' : '牌桌进行中'}</span><h3>${selfTurn ? '请将摸到的牌放在最右侧' : `等待${PLAYER_LABELS[state.currentPlayer]}出牌`}</h3><p>${selfTurn ? `检测到 ${target} 张后会自动计算建议。` : '只需说出牌名，系统会自动归属当前玩家。'}</p></div></section>`;
+  return `<section class="waiting-card"><span class="waiting-icon">${selfTurn ? '◫' : '···'}</span><div><span class="section-kicker">${selfTurn ? '等待摸牌' : '牌桌进行中'}</span><h3>${selfTurn ? '请用模拟按钮录入摸牌' : `等待${PLAYER_LABELS[state.currentPlayer]}出牌`}</h3><p>${selfTurn ? `实时时序检测尚未接入；目前只支持照片识别初始 ${target - 1} 张。` : '只需说出牌名，系统会自动归属当前玩家。'}</p></div></section>`;
 }
 function simulationControls(state) {
   const meldCount = state.melds.filter((meld) => meld.actor === 'self').length;
@@ -243,14 +273,14 @@ function handleSpeech(parsed, source = 'VOICE') {
 
 async function runSimulation(action, tile) {
   if (action === 'draw') {
-    const detected = await vision.detectDraw('8p'); runtime.lastMessage = `检测到摸牌：${tileLabel(detected.tile)} · 正在计算建议`; game.recordDraw(detected.tile);
+    runtime.lastMessage = '模拟摸牌：八筒 · 正在计算建议'; game.recordDraw('8p', 'MANUAL');
     await recommendCurrentHand();
     return;
   }
   if (action === 'discard') {
-    const detected = await vision.detectDiscard(tile); const recommended = game.getState().lastRecommendation?.tile;
+    const recommended = game.getState().lastRecommendation?.tile;
     runtime.lastMessage = recommended === tile ? `✓ 我打出${tileLabel(tile)}` : `实际：${tileLabel(tile)} · 推荐：${tileLabel(recommended)}`;
-    game.recordDiscard(detected.tile, { actor: 'self', source: 'VISION', confidence: detected.confidence });
+    game.recordDiscard(tile, { actor: 'self', source: 'MANUAL', confidence: 1 });
     showToast(runtime.lastMessage); return;
   }
   if (action === 'call') { openActorChoice('PONG'); return; }
@@ -317,6 +347,67 @@ function whyTemplate(rec) {
   const profileNames = { UNKNOWN: '未知', NORMAL: '普通', MIXED_SUIT: '混一色倾向', PURE_SUIT: '清一色倾向', HONORS: '字一色倾向', ALL_TRIPLETS: '对对胡倾向' };
   const opponentDetails = rec.candidates?.[0]?.opponents?.map((item) => `<div class="event-row"><span>${item.label}</span><div><b>${item.hardRonLock ? '活动荣和限制' : `相对损失指标 ${item.expectedLoss.toFixed(3)}`}</b><small>${escapeHtml(item.note)} · 副露方向 ${profileNames[item.profile] || '未知'} · 碰 ${item.pongPossible ? '可能' : '未见条件'} · 明杠 ${item.exposedKongPossible ? '可能' : '未见条件'}</small></div></div>`).join('') || '';
   return `<div class="sheet-handle"></div><div class="sheet-head"><div><span class="section-kicker">DECISION</span><h3>为什么打${tileLabel(rec.tile)}？</h3></div><button class="icon-btn" data-close-dialog>×</button></div><div class="event-list"><p>${escapeHtml(rec.reason || '暂无说明')}</p><p>${escapeHtml(rec.uncertainty || '对手暗手未知，风险仅供参考。')}</p>${(rec.candidates || []).slice(0, 5).map((item) => `<div class="event-row"><span>${tileGlyph(item.tile)}</span><div><b>${tileLabel(item.tile)} · ${item.shanten} 向听 · 未见有效牌 ${item.remainingCount} 张</b><small>相对点炮损失指标 ${item.expectedRonLoss.toFixed(3)} · 仅供本局候选排序</small></div></div>`).join('')}${opponentDetails}<p>没有对手暗手或牌墙信息；旧牌河同牌不等于绝对安全。牌型叠加和最终结算尚未定义。</p></div>`;
+}
+
+function renderVisionTest() {
+  speech.stop();
+  const result = visionTest.result;
+  app.innerHTML = `<main class="setup-page vision-test-page">
+    <header class="setup-header"><button class="icon-btn" id="test-home" aria-label="返回首页">‹</button><b>真实牌面测试</b><span></span></header>
+    <section class="setup-content"><div class="setup-title"><span class="section-kicker">ON-DEVICE VISION</span><h2>用照片测试识别</h2><p>选择一张能看清整排手牌的照片。照片只在本机处理；目前仅以你提供的三张照片建立牌面模板，未见过的牌应手动确认。</p></div>
+      <label class="file-button">选择照片<input type="file" id="test-photo" accept="image/*" /></label>
+      <button class="secondary-btn full" id="test-camera">${camera.stream ? '拍摄当前画面' : '开启后置摄像头'}</button>
+      <div class="camera-frame test-camera-frame"><video id="test-preview" autoplay muted playsinline></video><div class="camera-placeholder"><span>摄像头预览</span></div></div>
+      <label class="field-label" for="test-count">预期手牌张数</label><select class="select-control" id="test-count"><option value="13">13 张</option><option value="14">14 张</option></select>
+      ${result ? `<div class="scan-summary"><span><b>已定位 ${result.count} 个牌位</b><small>${result.recognized} 张暂识别 · ${result.count - result.recognized} 张待确认</small></span><span class="success-badge">${escapeHtml(visionTest.imageName)}</span></div>
+        ${location.hostname === '127.0.0.1' ? `<pre id="test-geometry" hidden>${JSON.stringify(result.geometry)}</pre>` : ''}
+        <p class="test-caveat">牌位按预期张数分割，不等于独立验证张数。点下面任意牌可纠正；相近牌和样本外牌不要直接用于实战。</p>
+        <div class="test-tile-grid">${result.observations.map((item) => `<button class="test-tile ${item.tile ? '' : 'uncertain'}" data-test-index="${item.index}" title="${item.alternatives.map((candidate) => `${candidate.tile}:${candidate.distance.toFixed(3)}`).join(' ')}"><img src="${item.crop}" alt="第 ${item.index + 1} 张牌面裁剪" /><span>${item.index + 1}. ${item.tile ? tileLabel(item.tile) : `待确认${item.candidate ? ` · 可能${tileLabel(item.candidate)}` : ''}`}</span></button>`).join('')}</div>` : '<p class="privacy-note">测试结果不会自动进入牌局。开局时请在设置流程中再次扫描并逐张确认。</p>'}
+    </section><dialog class="tile-dialog" id="tile-picker"></dialog><div class="toast" id="toast" role="status"></div>
+  </main>`;
+  byId('test-home').onclick = () => navigate('/');
+  byId('test-count').value = String(visionTest.expectedCount);
+  byId('test-count').onchange = (event) => { visionTest.expectedCount = Number(event.target.value); visionTest.result = null; renderVisionTest(); };
+  byId('test-photo').onchange = async (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    try { visionTest.imageName = file.name; visionTest.result = await vision.detectHand(await imageFromFile(file), { expectedCount: visionTest.expectedCount }); renderVisionTest(); }
+    catch (error) { showToast(error.message); }
+  };
+  byId('test-camera').onclick = async () => {
+    try {
+      if (!camera.stream) { await camera.request(byId('test-preview')); byId('test-camera').textContent = '拍摄当前画面'; return; }
+      const image = camera.snapshot(byId('test-preview'));
+      visionTest.imageName = '摄像头';
+      visionTest.result = await vision.detectHand(image, { expectedCount: visionTest.expectedCount }); renderVisionTest();
+    } catch (error) { showToast(error.message); }
+  };
+  if (camera.stream) camera.attach(byId('test-preview'));
+  document.querySelectorAll('[data-test-index]').forEach((button) => button.onclick = () => {
+    const index = Number(button.dataset.testIndex);
+    showTilePicker((tile) => {
+      void vision.learnCorrection(visionTest.result.observations[index].crop, tile);
+      visionTest.result.observations[index].tile = tile;
+      visionTest.result.tiles[index] = tile;
+      visionTest.result.recognized = visionTest.result.tiles.filter(Boolean).length;
+      renderVisionTest();
+    }, `纠正第 ${index + 1} 张`);
+  });
+  const sample = new URLSearchParams(location.search).get('sample');
+  if (location.hostname === '127.0.0.1' && /^[1-3]$/.test(sample || '') && !visionTest.result) {
+    const image = new Image(); image.src = `/__sample/${sample}.jpg`;
+    const holdout = new URLSearchParams(location.search).has('holdout');
+    image.decode().then(() => vision.detectHand(image, { expectedCount: 13, excludeRows: holdout ? [Number(sample) - 1] : [] })).then((result) => {
+      visionTest.imageName = `本地测试照片 ${sample}${holdout ? ' · 留出验证' : ''}`; visionTest.result = result; renderVisionTest();
+    }).catch((error) => showToast(error.message));
+  }
+}
+
+async function imageFromFile(file) {
+  if (!file) throw new Error('请选择照片');
+  if (!file.type.startsWith('image/')) throw new Error('请使用图片文件');
+  const url = URL.createObjectURL(file);
+  try { const image = new Image(); image.src = url; await image.decode(); return image; }
+  finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
 }
 
 function renderReview() {
